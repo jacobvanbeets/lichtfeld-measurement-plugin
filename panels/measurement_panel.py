@@ -3,7 +3,6 @@
 """Measurement Panel with 3D visualization."""
 
 import lichtfeld as lf
-from lfs_plugins.types import Panel
 
 from ..core.measurement import get_measurement_store, Measurement
 from ..operators.measure_picker import set_pick_callback, clear_pick_callback, was_pick_cancelled
@@ -103,11 +102,12 @@ def _ensure_draw_handler():
         _draw_handler_registered = True
 
 
-class MeasurementPanel(Panel):
+class MeasurementPanel(lf.ui.Panel):
     """Panel for 3D measurement tool."""
     
+    id = "measurement_tool.measurement_panel"
     label = "Measurement"
-    space = "MAIN_PANEL_TAB"
+    space = lf.ui.PanelSpace.MAIN_PANEL_TAB
     order = 26
     
     def __init__(self):
