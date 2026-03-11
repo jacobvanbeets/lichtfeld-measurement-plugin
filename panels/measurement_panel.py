@@ -2,6 +2,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Measurement Panel with 3D visualization."""
 
+import time as _time
+import math as _math
+
 import lichtfeld as lf
 
 from ..core.measurement import get_measurement_store, Measurement
@@ -14,6 +17,11 @@ _picking_state = {
     'picking_point': 0,  # 0 = not picking, 1 = picking point 1, 2 = picking point 2
     'status_msg': '',
 }
+
+# Flash highlight state
+_flash_measurement_id: str = ""
+_flash_start_time: float = 0.0
+_FLASH_DURATION: float = 1.5
 
 # Module-level state for pending pick from operator
 _pending_pick = None
@@ -45,14 +53,46 @@ def _measurement_draw_handler(ctx):
         _draw_measurement(ctx, m)
 
 
+def _is_flashing(m: Measurement) -> float:
+    """Return flash alpha (0.0-1.0) if this measurement is being flashed, else 0."""
+    global _flash_measurement_id, _flash_start_time
+    if m.id != _flash_measurement_id:
+        return 0.0
+    elapsed = _time.time() - _flash_start_time
+    if elapsed >= _FLASH_DURATION:
+        _flash_measurement_id = ""
+        return 0.0
+    pulse = _math.sin(elapsed * 10.0) * 0.5 + 0.5
+    fade = 1.0 - (elapsed / _FLASH_DURATION)
+    lf.ui.request_redraw()
+    return pulse * fade
+
+
+def _start_flash(measurement_id: str):
+    """Start flashing a measurement."""
+    global _flash_measurement_id, _flash_start_time
+    _flash_measurement_id = measurement_id
+    _flash_start_time = _time.time()
+    lf.ui.request_redraw()
+
+
 def _draw_measurement(ctx, m: Measurement):
     """Draw a single measurement."""
+    flash = _is_flashing(m)
     color = m.color
-    dim_color = (color[0] * 0.7, color[1] * 0.7, color[2] * 0.7, 0.8)
+    
+    # Flash: override color to bright yellow pulsing
+    if flash > 0:
+        color = (1.0, 1.0, 0.0, 0.5 + flash * 0.5)
+        point_size = 20.0 + flash * 12.0
+        line_width = 3.0 + flash * 4.0
+    else:
+        point_size = 16.0
+        line_width = 2.0
     
     # Draw Point 1
     if m.point1 is not None:
-        ctx.draw_point_3d(m.point1, color, 16.0)
+        ctx.draw_point_3d(m.point1, color, point_size)
         screen1 = ctx.world_to_screen(m.point1)
         if screen1:
             ctx.draw_circle_2d(screen1, 12.0, color, 2.0)
@@ -60,7 +100,7 @@ def _draw_measurement(ctx, m: Measurement):
     
     # Draw Point 2
     if m.point2 is not None:
-        ctx.draw_point_3d(m.point2, color, 16.0)
+        ctx.draw_point_3d(m.point2, color, point_size)
         screen2 = ctx.world_to_screen(m.point2)
         if screen2:
             ctx.draw_circle_2d(screen2, 12.0, color, 2.0)
@@ -69,7 +109,7 @@ def _draw_measurement(ctx, m: Measurement):
     # Draw line and distance if complete
     if m.is_complete:
         # Draw line in 3D
-        ctx.draw_line_3d(m.point1, m.point2, color, 2.0)
+        ctx.draw_line_3d(m.point1, m.point2, color, line_width)
         
         # Draw distance at midpoint
         midpoint = m.midpoint
@@ -195,9 +235,40 @@ class MeasurementPanel(lf.ui.Panel):
         
         # === New Measurement Button ===
         if layout.button("+ New Measurement", (-1, 32 * scale)):
+            if self._picking_point > 0:
+                self._cancel_picking()
             store.create()
             self._status_msg = "Created new measurement"
             self._status_is_error = False
+        
+        # === Pick Point Controls (always at top) ===
+        m = store.active
+        if m is not None:
+            # Pick Point 1
+            if self._picking_point == 1:
+                if layout.button_styled("[x] Stop Picking Point 1##pick1", "error", (-1, 32 * scale)):
+                    self._cancel_picking()
+            else:
+                btn_label = "Pick Point 1" if m.point1 is None else "Re-pick Point 1"
+                if layout.button(f"{btn_label}##pick1", (-1, 32 * scale)):
+                    self._start_picking(1)
+            
+            # Pick Point 2
+            if self._picking_point == 2:
+                if layout.button_styled("[x] Stop Picking Point 2##pick2", "error", (-1, 32 * scale)):
+                    self._cancel_picking()
+            else:
+                btn_label = "Pick Point 2" if m.point2 is None else "Re-pick Point 2"
+                if layout.button(f"{btn_label}##pick2", (-1, 32 * scale)):
+                    self._start_picking(2)
+            
+            # Clear points
+            if m.point1 or m.point2:
+                if layout.button("Clear Points##clear", (-1, 0)):
+                    m.clear()
+                    self._status_msg = "Points cleared"
+                    self._status_is_error = False
+                    lf.ui.request_redraw()
         
         layout.separator()
         
@@ -212,35 +283,34 @@ class MeasurementPanel(lf.ui.Panel):
                 # Measurement header row
                 layout.push_id(f"meas_{m.id}")
                 
-                # Selection/Active indicator
-                if is_active:
-                    layout.text_colored("▶", m.color)
+                # Build display label with distance
+                if m.is_complete:
+                    display_name = f"{m.name} — {m.format_distance(self._decimals)}"
                 else:
-                    if layout.selectable(f"  ##sel_{m.id}", False, (20 * scale, 0)):
+                    display_name = f"{m.name}: (incomplete)"
+                
+                # Measurement name row
+                if is_active:
+                    layout.text_colored(f"▶ {display_name}", m.color if m.is_complete else theme.palette.text_dim)
+                else:
+                    if layout.button(f"{display_name}##sel", (-1, 0)):
                         store.active_index = i
                 
+                # Control buttons row for every measurement
+                if layout.button(f"Flash##flash", (50 * scale, 0)):
+                    _start_flash(m.id)
                 layout.same_line()
-                
-                # Visibility toggle
-                vis_label = "👁" if m.visible else "○"
-                if layout.button(f"{vis_label}##vis_{m.id}", (24 * scale, 0)):
+                if layout.button(f"Remeasure##remeasure", (80 * scale, 0)):
+                    m.clear()
+                    store.active_index = i
+                    self._start_picking(1)
+                layout.same_line()
+                vis_text = "Hide" if m.visible else "Show"
+                if layout.button(f"{vis_text}##vis", (50 * scale, 0)):
                     m.visible = not m.visible
                     lf.ui.request_redraw()
-                
                 layout.same_line()
-                
-                # Measurement name and distance
-                if m.is_complete:
-                    label = f"{m.name}: {m.format_distance(self._decimals)}"
-                    layout.text_colored(label, m.color if is_active else theme.palette.text)
-                else:
-                    label = f"{m.name}: (incomplete)"
-                    layout.text_colored(label, theme.palette.text_dim)
-                
-                layout.same_line()
-                
-                # Delete button
-                if layout.button(f"✕##del_{m.id}", (24 * scale, 0)):
+                if layout.button_styled("Delete##del", "error", (55 * scale, 0)):
                     store.delete(i)
                     lf.ui.request_redraw()
                 
@@ -263,43 +333,15 @@ class MeasurementPanel(lf.ui.Panel):
                     # Delta info
                     if m.is_complete:
                         layout.text_colored(m.format_delta(self._decimals), (0.6, 0.6, 0.6, 1.0))
+                        layout.spacing()
+                        layout.label("Distance")
+                        layout.button_styled(
+                            f"Distance measured {m.format_distance(self._decimals)} units##dist_{m.id}",
+                            "primary",
+                            (-1, 32 * scale),
+                        )
                     
                     layout.unindent(20 * scale)
-        
-        layout.separator()
-        
-        # === Active Measurement Controls ===
-        m = store.active
-        if m is not None:
-            layout.label(f"Active: {m.name}")
-            
-            # Pick Point 1
-            if self._picking_point == 1:
-                if layout.button_styled("[x] Stop Picking Point 1##pick1", "error", (-1, 32 * scale)):
-                    self._cancel_picking()
-            else:
-                btn_label = "Pick Point 1" if m.point1 is None else "Re-pick Point 1"
-                if layout.button(f"{btn_label}##pick1", (-1, 32 * scale)):
-                    self._start_picking(1)
-            
-            # Pick Point 2
-            if self._picking_point == 2:
-                if layout.button_styled("[x] Stop Picking Point 2##pick2", "error", (-1, 32 * scale)):
-                    self._cancel_picking()
-            else:
-                btn_label = "Pick Point 2" if m.point2 is None else "Re-pick Point 2"
-                if layout.button(f"{btn_label}##pick2", (-1, 32 * scale)):
-                    self._start_picking(2)
-            
-            layout.spacing()
-            
-            # Clear points
-            if m.point1 or m.point2:
-                if layout.button("Clear Points##clear", (-1, 0)):
-                    m.clear()
-                    self._status_msg = "Points cleared"
-                    self._status_is_error = False
-                    lf.ui.request_redraw()
         
         # === Settings ===
         layout.separator()
