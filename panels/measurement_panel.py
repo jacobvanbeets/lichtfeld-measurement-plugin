@@ -4,11 +4,17 @@
 
 import time as _time
 import math as _math
+import numpy as np
 
 import lichtfeld as lf
 
 from ..core.measurement import get_measurement_store, Measurement
 from ..operators.measure_picker import set_pick_callback, clear_pick_callback, was_pick_cancelled
+from ..operators.gizmo_drag import (
+    start_gizmo_drag, is_dragging, get_drag_state, end_drag,
+    hit_test_gizmo_axis, start_axis_picker, is_picker_active, was_picker_cancelled,
+    cancel_axis_picker
+)
 
 
 # Module-level state for draw handler
@@ -16,6 +22,21 @@ _draw_handler_registered = False
 _picking_state = {
     'picking_point': 0,  # 0 = not picking, 1 = picking point 1, 2 = picking point 2
     'status_msg': '',
+}
+
+# Gizmo state - which point is being adjusted (0=none, 1=P1, 2=P2)
+_gizmo_point = 0
+_gizmo_measurement_id = ""
+
+# Drag mode state
+_drag_mode_active = False
+_drag_mode_point = 0  # 1 or 2
+
+# Axis colors for gizmo
+_AXIS_COLORS = {
+    'x': (1.0, 0.2, 0.2, 1.0),   # Red
+    'y': (0.2, 1.0, 0.2, 1.0),   # Green
+    'z': (0.2, 0.5, 1.0, 1.0),   # Blue
 }
 
 # Flash highlight state
@@ -48,6 +69,15 @@ def _measurement_draw_handler(ctx):
             color
         )
     
+    # Draw drag mode indicator
+    if _drag_mode_active and _drag_mode_point > 0:
+        # Show hint near gizmo
+        ctx.draw_text_2d(
+            (20, 80),
+            f"DRAG MODE P{_drag_mode_point}: Click & drag an axis arrow (ESC to cancel)",
+            (1.0, 0.8, 0.2, 1.0)
+        )
+    
     # Draw all visible measurements
     for m in store.get_visible():
         _draw_measurement(ctx, m)
@@ -76,8 +106,60 @@ def _start_flash(measurement_id: str):
     lf.ui.request_redraw()
 
 
+def _draw_gizmo_at_point(ctx, point):
+    """Draw XYZ gizmo arrows at a point."""
+    if point is None:
+        return
+    
+    screen_start = ctx.world_to_screen(point)
+    if not screen_start:
+        return
+    
+    # Get camera distance to scale arrow length
+    arrow_length = 0.5
+    view = lf.get_current_view()
+    if view:
+        try:
+            cam_pos = np.array(view.translation.numpy()).flatten()
+            dist = np.linalg.norm(np.array(point) - cam_pos)
+            arrow_length = dist * 0.12
+        except:
+            pass
+    
+    line_thickness = 4.0
+    
+    # Draw X axis (Red)
+    x_end = (point[0] + arrow_length, point[1], point[2])
+    screen_x = ctx.world_to_screen(x_end)
+    if screen_x:
+        ctx.draw_line_2d(screen_start, screen_x, _AXIS_COLORS['x'], line_thickness)
+        ctx.draw_circle_2d(screen_x, 8.0, _AXIS_COLORS['x'], 3.0)
+        ctx.draw_text_2d((screen_x[0] + 12, screen_x[1] - 5), "X", _AXIS_COLORS['x'])
+    
+    # Draw Y axis (Green)
+    y_end = (point[0], point[1] + arrow_length, point[2])
+    screen_y = ctx.world_to_screen(y_end)
+    if screen_y:
+        ctx.draw_line_2d(screen_start, screen_y, _AXIS_COLORS['y'], line_thickness)
+        ctx.draw_circle_2d(screen_y, 8.0, _AXIS_COLORS['y'], 3.0)
+        ctx.draw_text_2d((screen_y[0] + 12, screen_y[1] - 5), "Y", _AXIS_COLORS['y'])
+    
+    # Draw Z axis (Blue)
+    z_end = (point[0], point[1], point[2] + arrow_length)
+    screen_z = ctx.world_to_screen(z_end)
+    if screen_z:
+        ctx.draw_line_2d(screen_start, screen_z, _AXIS_COLORS['z'], line_thickness)
+        ctx.draw_circle_2d(screen_z, 8.0, _AXIS_COLORS['z'], 3.0)
+        ctx.draw_text_2d((screen_z[0] + 12, screen_z[1] - 5), "Z", _AXIS_COLORS['z'])
+    
+    # Draw white center
+    ctx.draw_circle_2d(screen_start, 10.0, (1.0, 1.0, 1.0, 1.0), 3.0)
+
+
 def _draw_measurement(ctx, m: Measurement):
     """Draw a single measurement."""
+    global _gizmo_point, _gizmo_measurement_id
+    
     flash = _is_flashing(m)
     color = m.color
     
@@ -90,6 +172,10 @@ def _draw_measurement(ctx, m: Measurement):
         point_size = 16.0
         line_width = 2.0
     
+    # Check if this measurement has gizmo active
+    show_gizmo_p1 = (m.id == _gizmo_measurement_id and _gizmo_point == 1)
+    show_gizmo_p2 = (m.id == _gizmo_measurement_id and _gizmo_point == 2)
+    
     # Draw Point 1
     if m.point1 is not None:
         ctx.draw_point_3d(m.point1, color, point_size)
@@ -97,6 +183,10 @@ def _draw_measurement(ctx, m: Measurement):
         if screen1:
             ctx.draw_circle_2d(screen1, 12.0, color, 2.0)
             ctx.draw_text_2d((screen1[0] + 15, screen1[1] - 8), "P1", color)
+        
+        # Draw gizmo at P1 if active
+        if show_gizmo_p1:
+            _draw_gizmo_at_point(ctx, m.point1)
     
     # Draw Point 2
     if m.point2 is not None:
@@ -105,6 +195,10 @@ def _draw_measurement(ctx, m: Measurement):
         if screen2:
             ctx.draw_circle_2d(screen2, 12.0, color, 2.0)
             ctx.draw_text_2d((screen2[0] + 15, screen2[1] - 8), "P2", color)
+        
+        # Draw gizmo at P2 if active
+        if show_gizmo_p2:
+            _draw_gizmo_at_point(ctx, m.point2)
     
     # Draw line and distance if complete
     if m.is_complete:
@@ -152,6 +246,8 @@ class MeasurementPanel(lf.ui.Panel):
     
     def __init__(self):
         self._picking_point = 0  # 0 = not picking, 1 or 2 = picking that point
+        self._adjust_point = 0   # 0 = not adjusting, 1 or 2 = adjusting that point
+        self._step_size = 0.01   # Step size for adjustment
         self._status_msg = ""
         self._status_is_error = False
         self._show_details = True
@@ -211,7 +307,43 @@ class MeasurementPanel(lf.ui.Panel):
         self._status_is_error = False
         lf.ui.request_redraw()
     
+    def _start_drag_mode(self, measurement_id: str, point_num: int):
+        """Start drag mode - show gizmo and wait for axis click."""
+        global _gizmo_point, _gizmo_measurement_id, _drag_mode_active, _drag_mode_point
+        
+        # Set up gizmo display
+        _gizmo_point = point_num
+        _gizmo_measurement_id = measurement_id
+        _drag_mode_active = True
+        _drag_mode_point = point_num
+        
+        # Start the axis picker modal
+        start_axis_picker(measurement_id, point_num, on_end=self._on_drag_mode_end)
+        
+        # Invoke the modal operator
+        op_id = "lfs_plugins.measurement_tool.operators.gizmo_drag.MEASURE_OT_axis_picker"
+        lf.ui.ops.invoke(op_id)
+        
+        self._status_msg = f"Drag mode active for P{point_num} - click on axis to drag"
+        self._status_is_error = False
+        lf.ui.request_redraw()
+    
+    def _on_drag_mode_end(self):
+        """Callback when drag mode ends."""
+        global _drag_mode_active, _drag_mode_point, _gizmo_point, _gizmo_measurement_id
+        _drag_mode_active = False
+        _drag_mode_point = 0
+        _gizmo_point = 0
+        _gizmo_measurement_id = ""
+        self._status_msg = "Drag completed"
+        self._status_is_error = False
+        lf.ui.request_redraw()
+    
     def draw(self, layout):
+        # Global declarations at top of method
+        global _drag_mode_active, _drag_mode_point, _gizmo_point, _gizmo_measurement_id
+        global _picking_state
+        
         theme = lf.ui.theme()
         scale = layout.get_dpi_scale()
         store = get_measurement_store()
@@ -225,11 +357,19 @@ class MeasurementPanel(lf.ui.Panel):
             self._status_msg = "Picking stopped"
             self._status_is_error = False
         
+        # Check if axis picker was cancelled
+        from ..operators.gizmo_drag import was_picker_cancelled as was_axis_picker_cancelled
+        if was_axis_picker_cancelled() and _drag_mode_active:
+            _drag_mode_active = False
+            _drag_mode_point = 0
+            _gizmo_point = 0
+            _gizmo_measurement_id = ""
+            self._status_msg = "Drag mode cancelled"
+        
         # Ensure draw handler
         _ensure_draw_handler()
         
         # Update module-level state
-        global _picking_state
         _picking_state['picking_point'] = self._picking_point
         _picking_state['status_msg'] = self._status_msg
         
@@ -340,6 +480,146 @@ class MeasurementPanel(lf.ui.Panel):
                             "primary",
                             (-1, 32 * scale),
                         )
+                        
+                        # === Adjust Points Section ===
+                        layout.spacing()
+                        layout.separator()
+                        layout.text_colored("─── Adjust Points ───", (1.0, 0.8, 0.2, 1.0))
+                        
+                        # Step size control
+                        layout.label("Step:")
+                        layout.same_line()
+                        step_options = [(0.001, ".001"), (0.01, ".01"), (0.1, ".1"), (1.0, "1.0")]
+                        for idx, (step_val, step_lbl) in enumerate(step_options):
+                            is_sel = abs(self._step_size - step_val) < 0.0001
+                            if is_sel:
+                                if layout.button_styled(f"{step_lbl}##st", "primary", (40 * scale, 0)):
+                                    self._step_size = step_val
+                            else:
+                                if layout.button(f"{step_lbl}##st{step_lbl}", (40 * scale, 0)):
+                                    self._step_size = step_val
+                            if idx < len(step_options) - 1:
+                                layout.same_line()
+                        
+                        layout.spacing()
+                        
+                        # Point 1 adjustment with gizmo toggle
+                        # Drag mode for P1 - click to enable, then drag gizmo axes in viewport
+                        gizmo_p1_active = (_gizmo_measurement_id == m.id and _gizmo_point == 1)
+                        drag_p1_active = (_drag_mode_active and _drag_mode_point == 1 and _gizmo_measurement_id == m.id)
+                        
+                        if drag_p1_active:
+                            if layout.button_styled("[DRAG P1 ACTIVE - Click axis in viewport]##drag1", "error", (-1, 28 * scale)):
+                                _drag_mode_active = False
+                                _drag_mode_point = 0
+                                _gizmo_point = 0
+                                _gizmo_measurement_id = ""
+                                lf.ui.request_redraw()
+                        elif gizmo_p1_active:
+                            if layout.button_styled("[Gizmo P1 ON] Click for Drag Mode##giz1", "primary", (-1, 28 * scale)):
+                                _drag_mode_active = True
+                                _drag_mode_point = 1
+                                self._start_drag_mode(m.id, 1)
+                                lf.ui.request_redraw()
+                        else:
+                            if layout.button("Enable P1 Drag Mode##giz1", (-1, 24 * scale)):
+                                _gizmo_point = 1
+                                _gizmo_measurement_id = m.id
+                                _drag_mode_active = True
+                                _drag_mode_point = 1
+                                self._start_drag_mode(m.id, 1)
+                                lf.ui.request_redraw()
+                        
+                        layout.text_colored("P1:", (0.4, 1.0, 0.4, 1.0))
+                        layout.same_line()
+                        layout.text_colored("X", (1.0, 0.3, 0.3, 1.0))
+                        layout.same_line()
+                        if layout.button("-##p1x-", (25 * scale, 0)):
+                            m.point1 = (m.point1[0] - self._step_size, m.point1[1], m.point1[2])
+                            lf.ui.request_redraw()
+                        layout.same_line()
+                        if layout.button("+##p1x+", (25 * scale, 0)):
+                            m.point1 = (m.point1[0] + self._step_size, m.point1[1], m.point1[2])
+                            lf.ui.request_redraw()
+                        layout.same_line()
+                        layout.text_colored("Y", (0.3, 1.0, 0.3, 1.0))
+                        layout.same_line()
+                        if layout.button("-##p1y-", (25 * scale, 0)):
+                            m.point1 = (m.point1[0], m.point1[1] - self._step_size, m.point1[2])
+                            lf.ui.request_redraw()
+                        layout.same_line()
+                        if layout.button("+##p1y+", (25 * scale, 0)):
+                            m.point1 = (m.point1[0], m.point1[1] + self._step_size, m.point1[2])
+                            lf.ui.request_redraw()
+                        layout.same_line()
+                        layout.text_colored("Z", (0.3, 0.3, 1.0, 1.0))
+                        layout.same_line()
+                        if layout.button("-##p1z-", (25 * scale, 0)):
+                            m.point1 = (m.point1[0], m.point1[1], m.point1[2] - self._step_size)
+                            lf.ui.request_redraw()
+                        layout.same_line()
+                        if layout.button("+##p1z+", (25 * scale, 0)):
+                            m.point1 = (m.point1[0], m.point1[1], m.point1[2] + self._step_size)
+                            lf.ui.request_redraw()
+                        
+                        # Drag mode for P2 - click to enable, then drag gizmo axes in viewport
+                        gizmo_p2_active = (_gizmo_measurement_id == m.id and _gizmo_point == 2)
+                        drag_p2_active = (_drag_mode_active and _drag_mode_point == 2 and _gizmo_measurement_id == m.id)
+                        
+                        if drag_p2_active:
+                            if layout.button_styled("[DRAG P2 ACTIVE - Click axis in viewport]##drag2", "error", (-1, 28 * scale)):
+                                _drag_mode_active = False
+                                _drag_mode_point = 0
+                                _gizmo_point = 0
+                                _gizmo_measurement_id = ""
+                                lf.ui.request_redraw()
+                        elif gizmo_p2_active:
+                            if layout.button_styled("[Gizmo P2 ON] Click for Drag Mode##giz2", "primary", (-1, 28 * scale)):
+                                _drag_mode_active = True
+                                _drag_mode_point = 2
+                                self._start_drag_mode(m.id, 2)
+                                lf.ui.request_redraw()
+                        else:
+                            if layout.button("Enable P2 Drag Mode##giz2", (-1, 24 * scale)):
+                                _gizmo_point = 2
+                                _gizmo_measurement_id = m.id
+                                _drag_mode_active = True
+                                _drag_mode_point = 2
+                                self._start_drag_mode(m.id, 2)
+                                lf.ui.request_redraw()
+                        
+                        # Point 2 adjustment
+                        layout.text_colored("P2:", (1.0, 0.6, 0.2, 1.0))
+                        layout.same_line()
+                        layout.text_colored("X", (1.0, 0.3, 0.3, 1.0))
+                        layout.same_line()
+                        if layout.button("-##p2x-", (25 * scale, 0)):
+                            m.point2 = (m.point2[0] - self._step_size, m.point2[1], m.point2[2])
+                            lf.ui.request_redraw()
+                        layout.same_line()
+                        if layout.button("+##p2x+", (25 * scale, 0)):
+                            m.point2 = (m.point2[0] + self._step_size, m.point2[1], m.point2[2])
+                            lf.ui.request_redraw()
+                        layout.same_line()
+                        layout.text_colored("Y", (0.3, 1.0, 0.3, 1.0))
+                        layout.same_line()
+                        if layout.button("-##p2y-", (25 * scale, 0)):
+                            m.point2 = (m.point2[0], m.point2[1] - self._step_size, m.point2[2])
+                            lf.ui.request_redraw()
+                        layout.same_line()
+                        if layout.button("+##p2y+", (25 * scale, 0)):
+                            m.point2 = (m.point2[0], m.point2[1] + self._step_size, m.point2[2])
+                            lf.ui.request_redraw()
+                        layout.same_line()
+                        layout.text_colored("Z", (0.3, 0.3, 1.0, 1.0))
+                        layout.same_line()
+                        if layout.button("-##p2z-", (25 * scale, 0)):
+                            m.point2 = (m.point2[0], m.point2[1], m.point2[2] - self._step_size)
+                            lf.ui.request_redraw()
+                        layout.same_line()
+                        if layout.button("+##p2z+", (25 * scale, 0)):
+                            m.point2 = (m.point2[0], m.point2[1], m.point2[2] + self._step_size)
+                            lf.ui.request_redraw()
                     
                     layout.unindent(20 * scale)
         
