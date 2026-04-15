@@ -69,14 +69,7 @@ class Measurement:
         d = self.delta
         if d is None:
             return "N/A"
-        return f"Delta({d[0]:.{decimals}f}, {d[1]:.{decimals}f}, {d[2]:.{decimals}f})"
-    
-    def format_delta_values(self, decimals: int = 3) -> str:
-        """Format the delta values as a string without prefix."""
-        d = self.delta
-        if d is None:
-            return "N/A"
-        return f"X={d[0]:.{decimals}f}, Y={d[1]:.{decimals}f}, Z={d[2]:.{decimals}f}"
+        return f"Δ({d[0]:.{decimals}f}, {d[1]:.{decimals}f}, {d[2]:.{decimals}f})"
     
     def clear(self):
         """Clear both points."""
