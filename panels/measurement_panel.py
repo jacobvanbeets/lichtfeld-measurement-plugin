@@ -68,14 +68,6 @@ def _measurement_draw_handler(ctx):
             color
         )
     
-    # Draw gizmo status indicator
-    if has_active_gizmos():
-        ctx.draw_text_2d(
-            (20, 80),
-            "Drag gizmo handles to move points",
-            (0.2, 0.8, 1.0, 1.0)
-        )
-    
     # Draw all visible measurements
     for m in store.get_visible():
         _draw_measurement(ctx, m)
