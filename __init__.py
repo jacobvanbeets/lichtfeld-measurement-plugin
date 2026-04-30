@@ -9,10 +9,9 @@ import lichtfeld as lf
 
 from .panels.measurement_panel import MeasurementPanel
 from .operators.measure_picker import MEASURE_OT_pick_point
-from .operators.gizmo_drag import MEASURE_OT_gizmo_drag, MEASURE_OT_axis_picker
 from .core.measurement import Measurement, MeasurementStore
 
-_classes = [MeasurementPanel, MEASURE_OT_pick_point, MEASURE_OT_gizmo_drag, MEASURE_OT_axis_picker]
+_classes = [MeasurementPanel, MEASURE_OT_pick_point]
 
 
 def on_load():

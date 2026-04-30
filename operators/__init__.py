@@ -3,6 +3,5 @@
 """Operators for the measurement tool."""
 
 from .measure_picker import MEASURE_OT_pick_point
-from .gizmo_drag import MEASURE_OT_gizmo_drag, MEASURE_OT_axis_picker
 
-__all__ = ["MEASURE_OT_pick_point", "MEASURE_OT_gizmo_drag", "MEASURE_OT_axis_picker"]
+__all__ = ["MEASURE_OT_pick_point"]

@@ -1,0 +1,13 @@
+{
+  "transport": "archive",
+  "origin": "https://github.com/jacobvanbeets/lichtfeld-measurement-plugin@master",
+  "github_url": "https://github.com/jacobvanbeets/lichtfeld-measurement-plugin",
+  "owner": "jacobvanbeets",
+  "repo": "lichtfeld-measurement-plugin",
+  "requested_ref": "master",
+  "resolved_ref": "master",
+  "registry_id": "community:measurement",
+  "version": "1.0.0",
+  "archive_url": "https://api.github.com/repos/jacobvanbeets/lichtfeld-measurement-plugin/tarball/master",
+  "schema": 1
+}

@@ -11,9 +11,8 @@ import lichtfeld as lf
 from ..core.measurement import get_measurement_store, Measurement
 from ..operators.measure_picker import set_pick_callback, clear_pick_callback, was_pick_cancelled
 from ..operators.gizmo_drag import (
-    start_gizmo_drag, is_dragging, get_drag_state, end_drag,
-    hit_test_gizmo_axis, start_axis_picker, is_picker_active, was_picker_cancelled,
-    cancel_axis_picker
+    attach_gizmo, detach_gizmo, detach_all_gizmos, is_gizmo_active,
+    has_active_gizmos, get_debug_status
 )
 
 
@@ -69,13 +68,12 @@ def _measurement_draw_handler(ctx):
             color
         )
     
-    # Draw drag mode indicator
-    if _drag_mode_active and _drag_mode_point > 0:
-        # Show hint near gizmo
+    # Draw gizmo status indicator
+    if has_active_gizmos():
         ctx.draw_text_2d(
             (20, 80),
-            f"DRAG MODE P{_drag_mode_point}: Click & drag an axis arrow (ESC to cancel)",
-            (1.0, 0.8, 0.2, 1.0)
+            "Drag gizmo handles to move points",
+            (0.2, 0.8, 1.0, 1.0)
         )
     
     # Draw all visible measurements
@@ -307,35 +305,27 @@ class MeasurementPanel(lf.ui.Panel):
         self._status_is_error = False
         lf.ui.request_redraw()
     
-    def _start_drag_mode(self, measurement_id: str, point_num: int):
-        """Start drag mode - show gizmo and wait for axis click."""
-        global _gizmo_point, _gizmo_measurement_id, _drag_mode_active, _drag_mode_point
+    def _toggle_gizmo(self, measurement_id: str, point_num: int):
+        """Toggle the native transform gizmo for a measurement point."""
+        global _gizmo_point, _gizmo_measurement_id
         
-        # Set up gizmo display
-        _gizmo_point = point_num
-        _gizmo_measurement_id = measurement_id
-        _drag_mode_active = True
-        _drag_mode_point = point_num
+        if is_gizmo_active(measurement_id, point_num):
+            # Detach gizmo
+            detach_gizmo(measurement_id, point_num)
+            _gizmo_point = 0
+            _gizmo_measurement_id = ""
+            self._status_msg = f"Gizmo disabled for P{point_num}"
+        else:
+            # Attach gizmo
+            success = attach_gizmo(measurement_id, point_num)
+            if success:
+                _gizmo_point = point_num
+                _gizmo_measurement_id = measurement_id
+                self._status_msg = f"Gizmo enabled for P{point_num} - drag to move"
+            else:
+                self._status_msg = f"Failed to attach gizmo: {get_debug_status()}"
+                self._status_is_error = True
         
-        # Start the axis picker modal
-        start_axis_picker(measurement_id, point_num, on_end=self._on_drag_mode_end)
-        
-        # Invoke the modal operator
-        op_id = "lfs_plugins.measurement_tool.operators.gizmo_drag.MEASURE_OT_axis_picker"
-        lf.ui.ops.invoke(op_id)
-        
-        self._status_msg = f"Drag mode active for P{point_num} - click on axis to drag"
-        self._status_is_error = False
-        lf.ui.request_redraw()
-    
-    def _on_drag_mode_end(self):
-        """Callback when drag mode ends."""
-        global _drag_mode_active, _drag_mode_point, _gizmo_point, _gizmo_measurement_id
-        _drag_mode_active = False
-        _drag_mode_point = 0
-        _gizmo_point = 0
-        _gizmo_measurement_id = ""
-        self._status_msg = "Drag completed"
         self._status_is_error = False
         lf.ui.request_redraw()
     
@@ -357,14 +347,7 @@ class MeasurementPanel(lf.ui.Panel):
             self._status_msg = "Picking stopped"
             self._status_is_error = False
         
-        # Check if axis picker was cancelled
-        from ..operators.gizmo_drag import was_picker_cancelled as was_axis_picker_cancelled
-        if was_axis_picker_cancelled() and _drag_mode_active:
-            _drag_mode_active = False
-            _drag_mode_point = 0
-            _gizmo_point = 0
-            _gizmo_measurement_id = ""
-            self._status_msg = "Drag mode cancelled"
+        # No longer need to check for cancelled picker with native gizmos
         
         # Ensure draw handler
         _ensure_draw_handler()
@@ -503,32 +486,14 @@ class MeasurementPanel(lf.ui.Panel):
                         
                         layout.spacing()
                         
-                        # Point 1 adjustment with gizmo toggle
-                        # Drag mode for P1 - click to enable, then drag gizmo axes in viewport
-                        gizmo_p1_active = (_gizmo_measurement_id == m.id and _gizmo_point == 1)
-                        drag_p1_active = (_drag_mode_active and _drag_mode_point == 1 and _gizmo_measurement_id == m.id)
-                        
-                        if drag_p1_active:
-                            if layout.button_styled("[DRAG P1 ACTIVE - Click axis in viewport]##drag1", "error", (-1, 28 * scale)):
-                                _drag_mode_active = False
-                                _drag_mode_point = 0
-                                _gizmo_point = 0
-                                _gizmo_measurement_id = ""
-                                lf.ui.request_redraw()
-                        elif gizmo_p1_active:
-                            if layout.button_styled("[Gizmo P1 ON] Click for Drag Mode##giz1", "primary", (-1, 28 * scale)):
-                                _drag_mode_active = True
-                                _drag_mode_point = 1
-                                self._start_drag_mode(m.id, 1)
-                                lf.ui.request_redraw()
+                        # Point 1 gizmo toggle
+                        gizmo_p1_on = is_gizmo_active(m.id, 1)
+                        if gizmo_p1_on:
+                            if layout.button_styled("[P1 Gizmo ON] Click to disable##giz1", "primary", (-1, 28 * scale)):
+                                self._toggle_gizmo(m.id, 1)
                         else:
-                            if layout.button("Enable P1 Drag Mode##giz1", (-1, 24 * scale)):
-                                _gizmo_point = 1
-                                _gizmo_measurement_id = m.id
-                                _drag_mode_active = True
-                                _drag_mode_point = 1
-                                self._start_drag_mode(m.id, 1)
-                                lf.ui.request_redraw()
+                            if layout.button("Enable P1 Gizmo##giz1", (-1, 24 * scale)):
+                                self._toggle_gizmo(m.id, 1)
                         
                         layout.text_colored("P1:", (0.4, 1.0, 0.4, 1.0))
                         layout.same_line()
@@ -562,31 +527,14 @@ class MeasurementPanel(lf.ui.Panel):
                             m.point1 = (m.point1[0], m.point1[1], m.point1[2] + self._step_size)
                             lf.ui.request_redraw()
                         
-                        # Drag mode for P2 - click to enable, then drag gizmo axes in viewport
-                        gizmo_p2_active = (_gizmo_measurement_id == m.id and _gizmo_point == 2)
-                        drag_p2_active = (_drag_mode_active and _drag_mode_point == 2 and _gizmo_measurement_id == m.id)
-                        
-                        if drag_p2_active:
-                            if layout.button_styled("[DRAG P2 ACTIVE - Click axis in viewport]##drag2", "error", (-1, 28 * scale)):
-                                _drag_mode_active = False
-                                _drag_mode_point = 0
-                                _gizmo_point = 0
-                                _gizmo_measurement_id = ""
-                                lf.ui.request_redraw()
-                        elif gizmo_p2_active:
-                            if layout.button_styled("[Gizmo P2 ON] Click for Drag Mode##giz2", "primary", (-1, 28 * scale)):
-                                _drag_mode_active = True
-                                _drag_mode_point = 2
-                                self._start_drag_mode(m.id, 2)
-                                lf.ui.request_redraw()
+                        # Point 2 gizmo toggle
+                        gizmo_p2_on = is_gizmo_active(m.id, 2)
+                        if gizmo_p2_on:
+                            if layout.button_styled("[P2 Gizmo ON] Click to disable##giz2", "primary", (-1, 28 * scale)):
+                                self._toggle_gizmo(m.id, 2)
                         else:
-                            if layout.button("Enable P2 Drag Mode##giz2", (-1, 24 * scale)):
-                                _gizmo_point = 2
-                                _gizmo_measurement_id = m.id
-                                _drag_mode_active = True
-                                _drag_mode_point = 2
-                                self._start_drag_mode(m.id, 2)
-                                lf.ui.request_redraw()
+                            if layout.button("Enable P2 Gizmo##giz2", (-1, 24 * scale)):
+                                self._toggle_gizmo(m.id, 2)
                         
                         # Point 2 adjustment
                         layout.text_colored("P2:", (1.0, 0.6, 0.2, 1.0))
