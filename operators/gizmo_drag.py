@@ -10,14 +10,6 @@ from ..core.measurement import get_measurement_store
 # Active gizmos - keyed by "measurement_id:point_num"
 _active_gizmos = {}
 
-# Debug status
-_debug_status = ""
-
-
-def get_debug_status():
-    """Get debug status for display."""
-    return _debug_status
-
 
 def _make_gizmo_key(measurement_id: str, point_num: int) -> str:
     """Create a unique key for a gizmo."""
@@ -56,12 +48,11 @@ def attach_gizmo(measurement_id: str, point_num: int, on_change=None, on_end=Non
     Returns:
         True if gizmo was attached, False otherwise
     """
-    global _debug_status, _active_gizmos
+    global _active_gizmos
     
     store = get_measurement_store()
     m = store.get_by_id(measurement_id)
     if not m:
-        _debug_status = "No measurement found"
         return False
     
     # Get current point
@@ -71,7 +62,6 @@ def attach_gizmo(measurement_id: str, point_num: int, on_change=None, on_end=Non
         point = m.point2
     
     if point is None:
-        _debug_status = f"Point {point_num} is None"
         return False
     
     key = _make_gizmo_key(measurement_id, point_num)
@@ -122,18 +112,16 @@ def attach_gizmo(measurement_id: str, point_num: int, on_change=None, on_end=Non
             gizmo.set_on_end(on_end)
         
         _active_gizmos[key] = gizmo
-        _debug_status = f"Gizmo attached for P{point_num}"
         lf.ui.request_redraw()
         return True
         
-    except Exception as e:
-        _debug_status = f"Error: {type(e).__name__}: {str(e)[:40]}"
+    except Exception:
         return False
 
 
 def detach_gizmo(measurement_id: str, point_num: int):
     """Detach a gizmo from a measurement point."""
-    global _active_gizmos, _debug_status
+    global _active_gizmos
     
     key = _make_gizmo_key(measurement_id, point_num)
     if key in _active_gizmos:
@@ -142,7 +130,6 @@ def detach_gizmo(measurement_id: str, point_num: int):
         except:
             pass
         del _active_gizmos[key]
-        _debug_status = f"Gizmo detached for P{point_num}"
         lf.ui.request_redraw()
         return True
     return False
@@ -150,7 +137,7 @@ def detach_gizmo(measurement_id: str, point_num: int):
 
 def detach_all_gizmos():
     """Detach all active gizmos."""
-    global _active_gizmos, _debug_status
+    global _active_gizmos
     
     for key, gizmo in list(_active_gizmos.items()):
         try:
@@ -158,7 +145,6 @@ def detach_all_gizmos():
         except:
             pass
     _active_gizmos.clear()
-    _debug_status = "All gizmos detached"
     lf.ui.request_redraw()
 
 
@@ -201,30 +187,3 @@ def end_axis_picker():
     pass  # Gizmos stay attached until explicitly detached
 
 
-# Additional legacy exports
-def start_gizmo_drag(*args, **kwargs):
-    return False
-
-def is_dragging():
-    return False
-
-def get_drag_state():
-    return {'active': False}
-
-def end_drag():
-    pass
-
-def hit_test_gizmo_axis(*args, **kwargs):
-    return None
-
-def get_debug_info():
-    return "", {}
-
-def get_last_event():
-    return ""
-
-def get_drag_status():
-    return _debug_status
-
-def get_drag_fail_reason():
-    return ""

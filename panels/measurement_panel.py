@@ -12,7 +12,7 @@ from ..core.measurement import get_measurement_store, Measurement
 from ..operators.measure_picker import set_pick_callback, clear_pick_callback, was_pick_cancelled
 from ..operators.gizmo_drag import (
     attach_gizmo, detach_gizmo, detach_all_gizmos, is_gizmo_active,
-    has_active_gizmos, get_debug_status
+    has_active_gizmos
 )
 
 
@@ -323,7 +323,7 @@ class MeasurementPanel(lf.ui.Panel):
                 _gizmo_measurement_id = measurement_id
                 self._status_msg = f"Gizmo enabled for P{point_num} - drag to move"
             else:
-                self._status_msg = f"Failed to attach gizmo: {get_debug_status()}"
+                self._status_msg = f"Failed to attach gizmo"
                 self._status_is_error = True
         
         self._status_is_error = False
