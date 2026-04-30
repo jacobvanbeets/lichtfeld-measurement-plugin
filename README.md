@@ -5,10 +5,12 @@ A 3D measurement tool plugin for measuring distances between points on Gaussian 
 ## Features
 
 - **Point Picking**: Click on the model to place measurement points
+- **Point Adjustment**: Use native transform gizmos to drag and fine-tune point positions
 - **3D Visualization**: See measurements overlaid on the 3D view with lines and distance labels
 - **Multiple Measurements**: Create and manage multiple measurements simultaneously
 - **Detailed Coordinates**: View exact X, Y, Z coordinates and deltas
 - **Visibility Control**: Toggle visibility of individual measurements
+- **Step Adjustment**: Fine-tune points with +/- buttons at configurable step sizes
 
 ## Usage
 
@@ -22,8 +24,11 @@ A 3D measurement tool plugin for measuring distances between points on Gaussian 
 
 - **Left Click**: Place a point when in picking mode
 - **ESC / Right Click**: Cancel picking mode
-- **👁 button**: Toggle measurement visibility
-- **✕ button**: Delete a measurement
+- **Enable P1/P2 Gizmo**: Activate a 3D transform gizmo to drag and adjust the point position
+- **+/- buttons**: Nudge points along X, Y, or Z axes by the selected step size
+- **Flash**: Briefly highlight a measurement in the viewport
+- **Hide/Show**: Toggle measurement visibility
+- **Delete**: Remove a measurement
 
 ## Installation
 
